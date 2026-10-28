@@ -20,7 +20,7 @@ permissions:
 jobs:
   windows-x64:
     name: Build OnAir IMBE / AMBE / AMBE2 (Windows x64)
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 45
     defaults:
       run:
