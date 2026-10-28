@@ -44,9 +44,27 @@ foreach(codec imbe ambe2 ambe)
     )
 endforeach()
 
+
+# TETRA uses a different speech format: 137 unpacked bits, 240 PCM samples.
+add_library(onair-codec-tetra SHARED "${CMAKE_CURRENT_LIST_DIR}/tetra_wrapper.c")
+target_compile_features(onair-codec-tetra PRIVATE c_std_99)
+target_include_directories(onair-codec-tetra PRIVATE
+    "${MBELIB_NEO_ROOT}/include"
+    "${MBELIB_NEO_BUILD}/include"
+)
+target_link_libraries(onair-codec-tetra PRIVATE mbe_neo_import)
+set_target_properties(onair-codec-tetra PROPERTIES
+    PREFIX "" OUTPUT_NAME "onair-codec-tetra"
+)
+add_custom_command(TARGET onair-codec-tetra POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${MBELIB_NEO_DLL}" "$<TARGET_FILE_DIR:onair-codec-tetra>/mbe-neo.dll"
+    VERBATIM
+)
+
 enable_testing()
 add_executable(onair-codec-smoke "${CMAKE_CURRENT_LIST_DIR}/smoke.c")
-foreach(codec imbe ambe2 ambe)
+foreach(codec imbe ambe2 ambe tetra)
     add_test(NAME "onair-${codec}-abi-smoke"
         COMMAND "$<TARGET_FILE:onair-codec-smoke>" "$<TARGET_FILE:onair-codec-${codec}>")
 endforeach()
