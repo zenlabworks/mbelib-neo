@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+name: OnAir Windows x64 codec DLLs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/onair-windows-x64.yml'
+      - 'tools/onair-codecs/**'
+      - 'CMakeLists.txt'
+      - 'src/**'
+      - 'include/**'
+      - 'cmake/**'
+      - 'tools/ci-dependency-pins.env'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Build OnAir IMBE / AMBE / AMBE2 (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout mbelib-neo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure and build Windows mbelib-neo
+        run: |
+          cmake -S . -B build/onair-neo -G "Visual Studio 17 2022" -A x64 `
+            -DMBELIB_BUILD_TESTS=OFF -DMBELIB_BUILD_EXAMPLES=OFF `
+            -DMBELIB_ENABLE_NATIVE=OFF -DMBELIB_ENABLE_SIMD=ON
+          if ($LASTEXITCODE -ne 0) { throw "mbelib-neo CMake configure failed" }
+          cmake --build build/onair-neo --config Release --target mbe-shared --parallel
+          if ($LASTEXITCODE -ne 0) { throw "mbelib-neo build failed" }
+          if (!(Test-Path "build/onair-neo/Release/mbe-neo.dll")) { throw "mbe-neo.dll missing" }
+          if (!(Test-Path "build/onair-neo/Release/mbe-neo.lib")) { throw "mbe-neo.lib missing" }
+
+      - name: Fetch pinned official OnAir wrapper source
+        run: |
+          $commit = "8ee15736d084ccea82dc13c99317a004fc08bc52"
+          $url = "https://raw.githubusercontent.com/adswill/OnAir/$commit/tools/codec-plugin-example/mbelib_wrapper.c"
+          New-Item -ItemType Directory -Force -Path "build/onair-sources" | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "build/onair-sources/mbelib_wrapper.c" -ErrorAction Stop
+          if ((Get-Item "build/onair-sources/mbelib_wrapper.c").Length -lt 1500) {
+            throw "OnAir wrapper source is unexpectedly short"
+          }
+
+      - name: Build OnAir codec plug-ins
+        run: |
+          $root = (Get-Location).Path -replace "\\", "/"
+          cmake -S tools/onair-codecs -B build/onair-plugins -G "Visual Studio 17 2022" -A x64 `
+            "-DMBELIB_NEO_ROOT=$root" `
+            "-DMBELIB_NEO_BUILD=$root/build/onair-neo" `
+            "-DMBELIB_NEO_DLL=$root/build/onair-neo/Release/mbe-neo.dll" `
+            "-DMBELIB_NEO_IMPLIB=$root/build/onair-neo/Release/mbe-neo.lib" `
+            "-DONAIR_WRAPPER_SOURCE=$root/build/onair-sources/mbelib_wrapper.c"
+          if ($LASTEXITCODE -ne 0) { throw "OnAir plug-in CMake configure failed" }
+          cmake --build build/onair-plugins --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw "OnAir plug-in build failed" }
+
+      - name: Test Windows DLL loading, symbols and codec initialization
+        run: |
+          ctest --test-dir build/onair-plugins -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "OnAir codec ABI smoke test failed" }
+
+      - name: Package Windows x64 codec DLLs
+        run: |
+          $stage = "build/onair-distribution"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $source = "build/onair-neo/Release/mbe-neo.dll"
+          Copy-Item -LiteralPath $source -Destination "$stage/mbe-neo.dll"
+          Copy-Item -LiteralPath $source -Destination "$stage/libmbe-neo.dll"
+          foreach ($codec in @("imbe", "ambe2", "ambe")) {
+            $src = "build/onair-plugins/output/Release/onair-codec-$codec.dll"
+            if (!(Test-Path $src)) { throw "Missing codec DLL: $src" }
+            Copy-Item -LiteralPath $src -Destination $stage
+          }
+          Copy-Item LICENSE "$stage/MBELIB-NEO-LICENSE.txt"
+          @(
+            "Windows x64 - OnAir mbelib-neo 2.6.5"
+            "Copy the five DLL files to %LOCALAPPDATA%\OnAir\codecs\"
+            "Then click Help > Voice codecs > Look again in OnAir."
+            "mbe-neo.dll is a plugin runtime dependency; libmbe-neo.dll is the OnAir lookup alias."
+            "Do not replace these with the older mbelib 1.x DLL."
+            "Unencrypted voice only; this package does not decrypt radio traffic."
+            "Smoke tests check loading and ABI, not over-the-air voice accuracy."
+          ) | Set-Content "$stage/README.txt" -Encoding ascii
+          $files = Get-ChildItem $stage -File | Sort-Object Name
+          $files | Select-Object Name,Length | Format-Table -AutoSize
+          if (($files | Where-Object { $_.Extension -eq ".dll" }).Count -ne 5) {
+            throw "Expected five DLLs in output package"
+          }
+          Compress-Archive -Path "$stage/*" -DestinationPath "build/OnAir_mbelib_neo_Windows_x64.zip" -Force
+          if (!(Test-Path "build/OnAir_mbelib_neo_Windows_x64.zip")) { throw "Archive missing" }
+
+      - name: Upload tested DLL package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OnAir-mbelib-neo-Windows-x64
+          path: build/OnAir_mbelib_neo_Windows_x64.zip
+          if-no-files-found: error
+          retention-days: 30
