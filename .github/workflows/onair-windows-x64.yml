@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   windows-x64:
-    name: Build OnAir IMBE / AMBE / AMBE2 (Windows x64)
+    name: Build OnAir TETRA / IMBE / AMBE / AMBE2 (Windows x64)
     runs-on: windows-2022
     timeout-minutes: 45
     defaults:
@@ -75,7 +75,7 @@ jobs:
           $source = "build/onair-neo/Release/mbe-neo.dll"
           Copy-Item -LiteralPath $source -Destination "$stage/mbe-neo.dll"
           Copy-Item -LiteralPath $source -Destination "$stage/libmbe-neo.dll"
-          foreach ($codec in @("imbe", "ambe2", "ambe")) {
+          foreach ($codec in @("imbe", "ambe2", "ambe", "tetra")) {
             $src = "build/onair-plugins/output/Release/onair-codec-$codec.dll"
             if (!(Test-Path $src)) { throw "Missing codec DLL: $src" }
             Copy-Item -LiteralPath $src -Destination $stage
@@ -83,17 +83,18 @@ jobs:
           Copy-Item LICENSE "$stage/MBELIB-NEO-LICENSE.txt"
           @(
             "Windows x64 - OnAir mbelib-neo 2.6.5"
-            "Copy the five DLL files to %LOCALAPPDATA%\OnAir\codecs\"
+            "Copy the six DLL files to %LOCALAPPDATA%\OnAir\codecs\"
             "Then click Help > Voice codecs > Look again in OnAir."
             "mbe-neo.dll is a plugin runtime dependency; libmbe-neo.dll is the OnAir lookup alias."
             "Do not replace these with the older mbelib 1.x DLL."
+            "Includes onair-codec-tetra.dll: 137 unpacked speech bits to 240 PCM samples." 
             "Unencrypted voice only; this package does not decrypt radio traffic."
             "Smoke tests check loading and ABI, not over-the-air voice accuracy."
           ) | Set-Content "$stage/README.txt" -Encoding ascii
           $files = Get-ChildItem $stage -File | Sort-Object Name
           $files | Select-Object Name,Length | Format-Table -AutoSize
-          if (($files | Where-Object { $_.Extension -eq ".dll" }).Count -ne 5) {
-            throw "Expected five DLLs in output package"
+          if (($files | Where-Object { $_.Extension -eq ".dll" }).Count -ne 6) {
+            throw "Expected six DLLs in output package"
           }
           Compress-Archive -Path "$stage/*" -DestinationPath "build/OnAir_mbelib_neo_Windows_x64.zip" -Force
           if (!(Test-Path "build/OnAir_mbelib_neo_Windows_x64.zip")) { throw "Archive missing" }
