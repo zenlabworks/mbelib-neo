@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #include <windows.h>
 
 typedef int (__cdecl *abi_fn)(void);
@@ -52,6 +53,33 @@ int main(int argc, char **argv) {
         close_codec(state);
         FreeLibrary(mod);
         return 7;
+    }
+    /* TETRA: validate full-size decoded output and strict input handling. */
+    if (strstr(argv[1], "tetra") != NULL) {
+        uint8_t bits[137] = {0};
+        int16_t tetra_pcm[240] = {0};
+        if (decode(state, bits, 137, tetra_pcm, 239) != -1) {
+            fprintf(stderr, "TETRA accepted undersized PCM buffer\n");
+            close_codec(state);
+            FreeLibrary(mod);
+            return 8;
+        }
+        bits[38] = 2;
+        if (decode(state, bits, 137, tetra_pcm, 240) != -1) {
+            fprintf(stderr, "TETRA accepted invalid bit value\n");
+            close_codec(state);
+            FreeLibrary(mod);
+            return 9;
+        }
+        bits[38] = 0;
+        for (int k = 0; k < 3; k++) {
+            if (decode(state, bits, 137, tetra_pcm, 240) != 240) {
+                fprintf(stderr, "TETRA did not return 240 samples\n");
+                close_codec(state);
+                FreeLibrary(mod);
+                return 10;
+            }
+        }
     }
     close_codec(state);
     FreeLibrary(mod);
